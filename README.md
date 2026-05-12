@@ -14,6 +14,45 @@ Instead of the full dataset (~112k images), only the **first three NIH image arc
 
 These archives contain **24,999 chest X-ray images** in total.
 
+### Official Dataset Split
+
+This project follows the **official NIH ChestX-ray14 patient-wise split**.
+
+The NIH dataset provides two predefined image lists:
+
+```text
+train_val_list.txt
+test_list.txt
+```
+
+The split is performed **at the patient level**, meaning images from the same patient do not appear in both training and testing sets, preventing data leakage.
+
+For this project, only the first three downloaded image archives were used (`images_001.tar.gz`–`images_003.tar.gz`), containing **24,999 images** in total.
+
+After intersecting the downloaded images with the official NIH split files:
+
+| Category | Number of Images |
+|-----------|----------------:|
+| Downloaded images | 24,999 |
+| Images in official `train_val_list.txt` | 20,931 |
+| Images in official `test_list.txt` | 4,068 |
+| Images not in any official split | 0 |
+
+Thus, the downloaded subset naturally contains both training and testing patients. To strictly follow the NIH official split, only the **20,931 images belonging to `train_val_list.txt`** were used for training/validation.
+
+The file:
+
+```text
+train_val_list_subset.txt
+```
+
+was generated as:
+
+```text
+downloaded_images ∩ train_val_list.txt
+```
+
+ensuring full consistency with the official NIH split. Images belonging to the official test set (**4,068 images**) were completely excluded from training.
 After filtering according to the provided train/validation split file, the final dataset used for model training and validation contains:
 
 **Total images used: 20,931**
@@ -36,6 +75,7 @@ After filtering according to the provided train/validation split file, the final
 | Fibrosis | 415 |
 | Pleural Thickening | 539 |
 | Hernia | 33 |
+
 
 > The dataset is highly imbalanced, particularly for rare classes such as **Hernia**, **Edema**, and **Pneumonia**. To alleviate class imbalance, a **weighted binary cross-entropy (BCE) loss** is adopted during training.
 
