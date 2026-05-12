@@ -6,26 +6,17 @@ Three-stage attention-guided classification of 14 thorax diseases on [NIH ChestX
 
 ---
 
-## Results (20k subset, val set)
-
-| Checkpoint | mean_AUC | focus_AUC | Note |
-|-----------|----------|-----------|------|
-| Stage 1 | 0.8136 | 0.8102 | cls branch only |
-| Stage 1 → Stage 3 | **0.8176** | **0.8159** | recommended |
-
----
-
 ## Environment
 
 ```bash
-pip install torch torchvision scikit-learn pandas matplotlib pillow
+pip install requirements.txt
 ```
 
 ---
 
 ## Data Download
 
-**Data is not included in this repo.** Download from NIH:
+Download from NIH:
 
 ### Step 1 — Images
 
@@ -62,38 +53,8 @@ Download `BBox_List_2017.csv` from the same NIH page:
 data/chestxray14/BBox_List_2017.csv
 ```
 
-### Final directory structure
-
-```
-data/chestxray14/
-├── images/                        # ~112k .png files (~45 GB)
-├── Data_Entry_2017.csv            # labels (required)
-├── BBox_List_2017.csv             # bounding boxes (optional)
-├── train_val_list_subset.txt      # ← included in repo (20,930 images)
-├── train_val_list.txt             # ← included in repo (86,523 images)
-└── test_list.txt                  # ← included in repo
-```
-
-> Labels are read from `Data_Entry_2017.csv`. The `.txt` files only determine which images belong to train/val/test splits.
-
-To use the full dataset (86k images), update `config.py`:
-```python
-TRAIN_LIST = os.path.join(DATA_ROOT, "train_val_list.txt")
-```
-
 ---
 
-## Key Config (`config.py`)
-
-| Parameter | Default | Note |
-|-----------|---------|------|
-| `MAX_ITER` | 8,000 | ≈ 10 epochs on 20k subset |
-| `LR` | 1e-3 | Stage 3 uses LR × 0.1 |
-| `LR_PATIENCE` | 3 | epochs before LR decay |
-| `BATCH_SIZE` | 24 | |
-| `BACKBONE` | resnet152 | or `efficientnet_b4` |
-
----
 
 ## Training
 
