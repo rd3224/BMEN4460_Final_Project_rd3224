@@ -1,6 +1,5 @@
-# Thorax-Net
+# Multi-Label Thoracic Disease Classification with Attention-Regularized Deep Neural Network
 
-Reproduction of **Wang et al., "Thorax-Net: An Attention Regularized Deep Neural Network for Classification of Thoracic Diseases on Chest Radiography," IEEE JBHI 2020.**
 
 Three-stage attention-guided classification of 14 thorax diseases on [NIH ChestX-ray14](https://nihcc.app.box.com/v/ChestXray-NIHCC).
 
@@ -45,7 +44,7 @@ Download `Data_Entry_2017.csv` from the same NIH page and place it at:
 data/chestxray14/Data_Entry_2017.csv
 ```
 
-### Step 3 — Bounding Boxes (optional, for visualization)
+### Step 3 — Bounding Boxes
 
 Download `BBox_List_2017.csv` from the same NIH page:
 
@@ -58,15 +57,6 @@ data/chestxray14/BBox_List_2017.csv
 
 ## Training
 
-### Recommended: Stage 1 → Stage 3
-
-```bash
-# Stage 1: fine-tune classification branch (~2.5h on 20k)
-nohup python3 train.py --stage 1 >> train_stage1.log 2>&1 &
-
-# Stage 3: end-to-end fine-tune from Stage 1 checkpoint
-nohup python3 train.py --stage 3 --resume checkpoints/stage1_best.pth >> train_stage3.log 2>&1 &
-```
 
 ### Full three-stage path (for full 86k dataset)
 
@@ -104,8 +94,6 @@ python3 evaluate.py --checkpoint checkpoints/stage3_best.pth --ablation
 python3 visualize.py --checkpoint checkpoints/stage3_best.pth --batch 9 --out vis/
 ```
 
-With `BBox_List_2017.csv` present: left = original + green GT bbox, right = attention heatmap.
-
 ---
 
 ## Monitor Training
@@ -126,4 +114,4 @@ nvidia-smi
 | att_branch | pre_conv (1×1, 3×3, 1×1) → Grad-CAM → post_conv (1×1, 1×1, 14×14) → sigmoid |
 | Diagnosis | `y_diag = (y_cls + y_att) / 2` |
 | Loss | Weighted BCE: `β_pos = (P+N)/P`, `β_neg = (P+N)/N` |
-| Stage 2 optimizer | Adam lr=1e-4 (SGD fails due to vanishing Grad-CAM gradients on small datasets) |
+| Stage 2 optimizer | Adam lr=1e-4 |
