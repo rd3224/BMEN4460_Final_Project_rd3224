@@ -1,8 +1,4 @@
-# Thorax-Net
-
-Implementation of **Thorax-Net: An Attention Regularized Deep Neural Network for Classification of Thoracic Diseases on Chest Radiography** for multi-label classification of **14 thorax diseases** on the NIH ChestX-ray14 dataset.
-
-This implementation adopts the original **three-stage attention-guided training strategy**, including classification branch training, attention branch optimization, and end-to-end fine-tuning.
+# ChestX-ray14 Multi-label Classification
 
 ---
 
