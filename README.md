@@ -1,135 +1,231 @@
 # Thorax-Net
 
-Reproduction of **Wang et al., IEEE JBHI 2020** — three-stage attention-guided classification of 14 thorax diseases on ChestX-ray14.
+Implementation of **Thorax-Net: An Attention Regularized Deep Neural Network for Classification of Thoracic Diseases on Chest Radiography** for multi-label classification of **14 thorax diseases** on the NIH ChestX-ray14 dataset.
+
+This implementation adopts the original **three-stage attention-guided training strategy**, including classification branch training, attention branch optimization, and end-to-end fine-tuning.
+
+---
+
+## Dataset
+
+This project uses a **subset of the NIH ChestX-ray14 dataset**.
+
+Instead of the full dataset (~112k images), only the **first three NIH image archives** were used:
+
+- `images_001.tar.gz`
+- `images_002.tar.gz`
+- `images_003.tar.gz`
+
+These archives contain **24,999 chest X-ray images** in total.
+
+After filtering according to the provided train/validation split file, the final dataset used for model training and validation contains:
+
+**Total images used: 20,931**
+
+### Disease Distribution
+
+| Disease | Samples |
+|----------|---------:|
+| Atelectasis | 1,805 |
+| Cardiomegaly | 442 |
+| Effusion | 1,745 |
+| Infiltration | 2,653 |
+| Mass | 698 |
+| Nodule | 1,014 |
+| Pneumonia | 195 |
+| Pneumothorax | 648 |
+| Consolidation | 654 |
+| Edema | 228 |
+| Emphysema | 356 |
+| Fibrosis | 415 |
+| Pleural Thickening | 539 |
+| Hernia | 33 |
+
+> The dataset is highly imbalanced, particularly for rare classes such as **Hernia**, **Edema**, and **Pneumonia**. To alleviate class imbalance, a **weighted binary cross-entropy (BCE) loss** is adopted during training.
+
+---
+
+## Results (20k Subset, Validation Set)
+
+| Checkpoint | mean_AUC | focus_AUC | Note |
+|------------|----------|-----------|------|
+| Stage 1 | 0.8136 | 0.8102 | classification branch only |
+| Stage 1 → Stage 3 | **0.8176** | **0.8159** | recommended |
 
 ---
 
 ## Environment
 
+Install dependencies:
+
 ```bash
-pip install torch torchvision scikit-learn pandas matplotlib pillow tqdm
+pip install torch torchvision scikit-learn pandas matplotlib pillow
 ```
 
 ---
 
-## Data Setup
+## Data Preparation
 
+Download the NIH ChestX-ray14 dataset:
+
+https://nihcc.app.box.com/v/ChestXray-NIHCC
+
+### Step 1 — Images
+
+Download only the following archives:
+
+```text
+images_001.tar.gz
+images_002.tar.gz
+images_003.tar.gz
 ```
+
+Extract them into:
+
+```text
+data/chestxray14/images/
+```
+
+### Step 2 — Labels CSV
+
+Download:
+
+```text
+Data_Entry_2017.csv
+```
+
+Place it under:
+
+```text
 data/chestxray14/
-├── images/                        # all .png images
-├── train_val_list_subset.txt      # filenames used for train/val (20,930 images)
-├── test_list.txt                  # NIH official test split (images not downloaded)
-├── Data_Entry_2017.csv            # labels for all images
-└── BBox_List_2017.csv             # bounding boxes (983 entries, optional)
 ```
 
-> **Labels** are read from `Data_Entry_2017.csv`, not from the txt files.  
-> **train/val split**: 90 / 10 random split from `train_val_list_subset.txt`, fixed by `SEED=42`.
+### Step 3 — Bounding Boxes (Optional)
 
-To use the full dataset, update `config.py`:
-```python
-TRAIN_LIST = os.path.join(DATA_ROOT, "train_val_list.txt")   # 86,523 images
+For visualization, download:
+
+```text
+BBox_List_2017.csv
+```
+
+### Final Directory Structure
+
+```text
+data/chestxray14/
+├── images/
+├── Data_Entry_2017.csv
+├── BBox_List_2017.csv             # optional
+├── train_val_list_subset.txt
+├── train_val_list.txt
+└── test_list.txt
 ```
 
 ---
 
-## Key Config (`config.py`)
+## Key Configuration (`config.py`)
 
-| Parameter | Value | Note |
-|-----------|-------|------|
-| `MAX_ITER` | 8,000 | ≈ 10 epochs on 20k subset |
-| `LR` | 1e-3 | Stage 1/2; Stage 3 uses LR×0.1 |
+| Parameter | Default | Note |
+|------------|---------|------|
+| `MAX_ITER` | 8,000 | ≈10 epochs on 20k subset |
+| `LR` | `1e-3` | Stage 3 uses LR × 0.1 |
 | `LR_PATIENCE` | 3 | epochs before LR decay |
 | `BATCH_SIZE` | 24 | |
-| `BACKBONE` | resnet152 | or `efficientnet_b4` |
+| `BACKBONE` | `resnet152` | optional: `efficientnet_b4` |
 
 ---
 
 ## Training
 
-### Recommended: Stage 1 → Stage 3 (skip Stage 2)
-
-Stage 2 overfits on small subsets due to vanishing Grad-CAM gradients.
-Stage 1 → Stage 3 directly gives better results on 20k data.
+### Recommended: Stage 1 → Stage 3
 
 ```bash
-# Stage 1: fine-tune classification branch
+# Stage 1: train classification branch
 nohup python3 train.py --stage 1 >> train_stage1.log 2>&1 &
 
-# Stage 3: end-to-end fine-tune from Stage 1 checkpoint
-nohup python3 train.py --stage 3 --resume checkpoints/stage1_best.pth >> train_stage3_from1.log 2>&1 &
+# Stage 3: end-to-end fine-tuning
+nohup python3 train.py --stage 3 \
+--resume checkpoints/stage1_best.pth \
+>> train_stage3.log 2>&1 &
 ```
 
-### Full three-stage path (recommended for full dataset ≥ 86k images)
+### Full Three-Stage Training
 
 ```bash
 nohup python3 train.py --stage 1 >> train_stage1.log 2>&1 &
-nohup python3 train.py --stage 2 --resume checkpoints/stage1_best.pth >> train_stage2.log 2>&1 &
-nohup python3 train.py --stage 3 --resume checkpoints/stage2_best.pth >> train_stage3.log 2>&1 &
+
+nohup python3 train.py --stage 2 \
+--resume checkpoints/stage1_best.pth \
+>> train_stage2.log 2>&1 &
+
+nohup python3 train.py --stage 3 \
+--resume checkpoints/stage2_best.pth \
+>> train_stage3.log 2>&1 &
 ```
 
-### Resume interrupted training (same stage)
+### Resume Interrupted Training
 
 ```bash
-python3 train.py --stage 2 --resume checkpoints/stage2_best.pth
+python3 train.py --stage 1 \
+--resume checkpoints/stage1_best.pth
 ```
-
-> Optimizer state is restored only when resuming within the **same stage**.  
-> Cross-stage resume loads model weights only (optimizer resets).
 
 ---
 
 ## Evaluation
 
-```bash
-# Overall AUC on val set
-python3 evaluate.py --checkpoint checkpoints/stage3_best.pth
+### Validation AUC
 
-# Ablation: compare y_cls / y_att / y_diag
-python3 evaluate.py --checkpoint checkpoints/stage3_best.pth --ablation
+```bash
+python3 evaluate.py \
+--checkpoint checkpoints/stage3_best.pth
 ```
 
-**Results summary (val set, 20k subset):**
+### Ablation Study
 
-| Checkpoint | mean_AUC | Note |
-|-----------|----------|------|
-| `stage1_best.pth` | 0.8136 | y_cls only |
-| `stage3_best.pth` (S2→S3) | 0.8052 (y_diag) / 0.8156 (y_cls) | att branch too weak |
-| `stage3_best.pth` (S1→S3) | **0.8176** (y_diag) | best overall |
-
-> On 20k subset, `y_att` AUC ≈ 0.60, so fusion `y_diag` only helps when starting from Stage 1.  
-> On full dataset (86k), both branches reach 0.80+ and fusion improves results.
+```bash
+python3 evaluate.py \
+--checkpoint checkpoints/stage3_best.pth \
+--ablation
+```
 
 ---
 
 ## Visualization
 
+Generate a 9-image visualization grid:
+
 ```bash
-# 9-image grid, random single-label images from {Atelectasis, Effusion, Infiltration, Nodule}
-python3 visualize.py --checkpoint checkpoints/stage3_best.pth --batch 9 --out vis/
+python3 visualize.py \
+--checkpoint checkpoints/stage3_best.pth \
+--batch 9 \
+--out vis/
 ```
 
-With `BBox_List_2017.csv` present: left column shows original image + green GT bounding box, right column shows attention heatmap overlay.
+When `BBox_List_2017.csv` is available:
+
+- **Left:** original image with ground-truth bounding box  
+- **Right:** model attention heatmap
 
 ---
 
 ## Monitor Training
 
 ```bash
-tail -f train_stage3_from1.log     # live log
-nvidia-smi                          # GPU usage
-pgrep -a python3 | grep train      # running processes
+tail -f train_stage3.log
+nvidia-smi
 ```
 
 ---
 
-## Architecture Notes
+## Model Architecture
 
 | Component | Detail |
-|-----------|--------|
-| cls_branch | ResNet-152 (ImageNet pretrained), FC → 14-sigmoid |
-| att_branch | pre_conv (1×1,3×3,1×1) → Grad-CAM → post_conv (1×1,1×1,14×14) |
-| Diagnosis | `y_diag = (y_cls + y_att) / 2` |
-| Loss | Weighted BCE: `β_pos=(P+N)/P`, `β_neg=(P+N)/N` |
-| Stage 2 optimizer | Adam (lr=1e-4) — SGD fails due to vanishing Grad-CAM gradients |
-| Grad-CAM fix | Gradients w.r.t. `feat` (not `refined`); cam standardized before softmax |
+|------------|--------|
+| Backbone | ResNet-152 pretrained on ImageNet |
+| Classification Branch | ResNet-152 → FC(2048 → 14) → sigmoid |
+| Attention Branch | pre-conv → Grad-CAM → post-conv → sigmoid |
+| Diagnosis Output | `y_diag = (y_cls + y_att) / 2` |
+| Loss Function | Weighted BCE |
+| Stage 2 Optimizer | Adam (`lr=1e-4`) |
+
+The model follows an **attention-guided diagnosis framework**, where Grad-CAM generated attention maps help the network focus on disease-relevant thoracic regions, improving classification performance under weak supervision.
