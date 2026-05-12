@@ -56,10 +56,10 @@ def train_one_epoch(model, loader, criterion, optimizer, device, stage):
             out  = model(images)
             if stage == 2:
                 loss = criterion(out["y_att"], labels)
-            else:                        # stage 3: end-to-end
-                loss = (criterion(out["y_cls"],  labels)
-                      + criterion(out["y_att"],  labels)
-                      + criterion(out["y_diag"], labels)) / 3
+            else:                        # stage 3: end-to-end weighted loss
+                loss = (config.STAGE3_W_CLS  * criterion(out["y_cls"],  labels) +
+                        config.STAGE3_W_ATT  * criterion(out["y_att"],  labels) +
+                        config.STAGE3_W_DIAG * criterion(out["y_diag"], labels))
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -139,12 +139,21 @@ def run_stage(stage: int, model, train_loader, val_loader, train_ds,
     start_epoch = 0
     if resume_ckpt and os.path.isfile(resume_ckpt):
         ckpt = torch.load(resume_ckpt, map_location=device)
-        model.load_state_dict(ckpt["model"])
+        load_res = model.load_state_dict(ckpt["model"], strict=False)
+        if load_res.missing_keys or load_res.unexpected_keys:
+            print("  Partial checkpoint load due to architecture mismatch:")
+            if load_res.missing_keys:
+                print(f"    missing keys: {len(load_res.missing_keys)}")
+            if load_res.unexpected_keys:
+                print(f"    unexpected keys: {len(load_res.unexpected_keys)}")
         # Only restore optimizer state when resuming within the same stage;
         # across stages the parameter groups differ and cannot be loaded.
         if ckpt.get("stage") == stage:
-            optimizer.load_state_dict(ckpt["optimizer"])
-            start_epoch = ckpt.get("epoch", 0) + 1
+            try:
+                optimizer.load_state_dict(ckpt["optimizer"])
+                start_epoch = ckpt.get("epoch", 0) + 1
+            except Exception:
+                print("  Optimizer state not restored (parameter groups changed).")
         print(f"  Resumed from {resume_ckpt} (epoch {start_epoch})")
 
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)

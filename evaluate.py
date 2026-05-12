@@ -24,7 +24,8 @@ def get_device():
     return torch.device("cpu")
 
 
-def evaluate_model(model, loader, device, ablation=False):
+def evaluate_model(model, loader, device, ablation=False,
+                   roc_title="ROC Curves — Chest X-ray Multi-label"):
     """
     Run inference on `loader`, compute and display AUC metrics.
     If ablation=True also prints branch-level comparison.
@@ -54,7 +55,7 @@ def evaluate_model(model, loader, device, ablation=False):
     auc_dict = compute_aucs(y_true, y_diag)
     print_auc_table(auc_dict)
 
-    plot_roc_curves(y_true, y_diag, save_path="roc_thoraxnet.png")
+    plot_roc_curves(y_true, y_diag, save_path="roc.png", title=roc_title)
 
     if ablation:
         compare_branches(y_true, y_cls, y_att, y_diag)
@@ -68,18 +69,27 @@ def main():
     parser.add_argument("--backbone",   default=config.BACKBONE)
     parser.add_argument("--ablation",   action="store_true",
                         help="Also print per-branch AUC comparison")
+    parser.add_argument("--roc-title", default="ROC Curves — Chest X-ray Multi-label",
+                        help="Title shown on saved ROC figure")
     args = parser.parse_args()
 
     device = get_device()
-    _, test_loader, _, _ = get_loaders()  # use val split (test images not downloaded)
+    _, _, test_loader, _ = get_loaders()
 
     model = ThoraxNet(backbone=args.backbone).to(device)
     ckpt  = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(ckpt["model"])
+    load_res = model.load_state_dict(ckpt["model"], strict=False)
+    if load_res.missing_keys or load_res.unexpected_keys:
+        print("Partial checkpoint load due to architecture mismatch:")
+        if load_res.missing_keys:
+            print(f"  missing keys: {len(load_res.missing_keys)}")
+        if load_res.unexpected_keys:
+            print(f"  unexpected keys: {len(load_res.unexpected_keys)}")
     print(f"Loaded checkpoint: {args.checkpoint}  "
           f"(val AUC at save: {ckpt.get('val_auc', 'N/A')})")
 
-    evaluate_model(model, test_loader, device, ablation=args.ablation)
+    evaluate_model(model, test_loader, device, ablation=args.ablation,
+                   roc_title=args.roc_title)
 
 
 if __name__ == "__main__":

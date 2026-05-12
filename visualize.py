@@ -1,7 +1,7 @@
 """
 visualize.py — Attention heatmap visualization
 ================================================
-Reproduces Fig. 4 and Fig. 6 from the paper.
+Visualization utilities for the current learnable class-wise attention model.
 
 Usage:
     python visualize.py --checkpoint checkpoints/stage3_best.pth \
@@ -31,20 +31,19 @@ from models.thorax_net import ThoraxNet
 
 def load_bbox_map(bbox_csv: str) -> dict:
     """
-    Load BBox_List_2017.csv → {filename: [(label, x, y, w, h, orig_w, orig_h), ...]}
-    NIH columns: Image Index, Finding Label, Bbox[x,y,w,h], OriginalImage[W,H], spacing...
+    Load BBox_List_2017.csv → {filename: [(label, x, y, w, h), ...]}
+    NIH columns: Image Index, Finding Label, Bbox[x,y,w,h]
+    Coordinates are in original image pixel space.
     """
     if not os.path.isfile(bbox_csv):
         return {}
     df = pd.read_csv(bbox_csv, header=0)
-    df.columns = [c.strip() for c in df.columns]
     bbox_map = {}
     for _, row in df.iterrows():
         fname = str(row.iloc[0]).strip()
         label = str(row.iloc[1]).strip()
         x, y, w, h = float(row.iloc[2]), float(row.iloc[3]), float(row.iloc[4]), float(row.iloc[5])
-        orig_w, orig_h = float(row.iloc[6]), float(row.iloc[7])
-        bbox_map.setdefault(fname, []).append((label, x, y, w, h, orig_w, orig_h))
+        bbox_map.setdefault(fname, []).append((label, x, y, w, h))
     return bbox_map
 
 
@@ -97,7 +96,6 @@ def overlay_heatmap(pil_img, heatmap: np.ndarray, alpha=0.45):
     return Image.fromarray(overlay)
 
 
-@torch.no_grad()
 def visualize_single(model, image_tensor, label_vec, device,
                       true_labels=None, save_path="heatmap.png"):
     """
@@ -107,7 +105,7 @@ def visualize_single(model, image_tensor, label_vec, device,
     model.eval()
     img_t = image_tensor.unsqueeze(0).to(device)
 
-    with torch.enable_grad():
+    with torch.no_grad():
         out = model(img_t)
 
     y_diag   = out["y_diag"][0].cpu().numpy()        # [14]
@@ -179,10 +177,12 @@ def visualize_batch_grid(model, loader, device, n=9, save_path="grid.png",
 
     for idx, (img_t, label, fname) in enumerate(collected):
         img_t_dev = img_t.unsqueeze(0).to(device)
-        with torch.enable_grad():
+        with torch.no_grad():
             out = model(img_t_dev)
 
         y_cls    = out["y_cls"][0].detach().cpu().numpy()
+        y_att    = out["y_att"][0].detach().cpu().numpy()
+        y_diag   = out["y_diag"][0].detach().cpu().numpy()
         att_maps = out["att_maps"][0].detach().cpu().numpy()
         true_cls = [config.CLASSES[i] for i in range(14) if label[i] > 0.5]
         gt_label = true_cls[0] if true_cls else "Normal"
@@ -198,7 +198,9 @@ def visualize_batch_grid(model, loader, device, n=9, save_path="grid.png",
         ax_orig = axes[idx, 0]
         ax_orig.imshow(pil_img)
         if fname in bbox_map:
-            for (blabel, bx, by, bw, bh, orig_w, orig_h) in bbox_map[fname]:
+            orig_img = Image.open(os.path.join(config.IMAGE_DIR, fname))
+            orig_w, orig_h = orig_img.size
+            for (blabel, bx, by, bw, bh) in bbox_map[fname]:
                 if blabel == gt_label:
                     x2, y2, w2, h2 = transform_bbox(bx, by, bw, bh, orig_w, orig_h)
                     rect = patches.Rectangle((x2, y2), w2, h2,
@@ -215,7 +217,9 @@ def visualize_batch_grid(model, loader, device, n=9, save_path="grid.png",
         overlay = overlay_heatmap(pil_img, heatmap)
         ax_heat.imshow(overlay)
         ax_heat.set_title(
-            f"Attention ({gt_label})\ny_cls={y_cls[gt_idx]:.2f}", fontsize=7)
+            f"Attention ({gt_label})\ny_att={y_att[gt_idx]:.2f} | y_diag={y_diag[gt_idx]:.2f}",
+            fontsize=7,
+        )
         ax_heat.axis("off")
 
     plt.suptitle("Thorax-Net — GT bbox (green) vs Attention Heatmap", fontsize=11)
@@ -225,17 +229,104 @@ def visualize_batch_grid(model, loader, device, n=9, save_path="grid.png",
     print(f"Saved grid → {save_path}")
 
 
+def visualize_comparison(model1, model2, loader, device, n=9,
+                          label1="Stage1", label2="Stage3",
+                          save_path="comparison.png"):
+    """
+    For n randomly selected correctly-predicted single-label images, show:
+      col 0: original image
+      col 1: model1 attention heatmap (GT class)
+      col 2: model2 attention heatmap (GT class)
+    "Correctly predicted" = argmax(y_cls) == GT label (top-1 match).
+    """
+    FOCUS = {"Atelectasis", "Effusion", "Infiltration", "Nodule"}
+    focus_idx = {config.CLASSES.index(c) for c in FOCUS}
+
+    model1.eval(); model2.eval()
+    correct = []
+
+    for images, labels, fnames in loader:
+        for i in range(len(images)):
+            lbl = labels[i]
+            pos = lbl.nonzero(as_tuple=True)[0].tolist()
+            if len(pos) != 1 or pos[0] not in focus_idx:
+                continue
+            gt_idx = pos[0]
+            img_dev = images[i].unsqueeze(0).to(device)
+            with torch.no_grad():
+                out2 = model2(img_dev)
+            pred_idx = int(out2["y_cls"][0].detach().argmax().item())
+            if pred_idx == gt_idx:
+                correct.append((images[i], lbl, fnames[i]))
+
+    random.shuffle(correct)
+    collected = correct[:n]
+    print(f"Found {len(correct)} correct predictions, using {len(collected)}")
+
+    fig, axes = plt.subplots(len(collected), 3,
+                              figsize=(11, len(collected) * 3.2))
+    if len(collected) == 1:
+        axes = axes[np.newaxis, :]
+
+    col_titles = ["Original", label1, label2]
+    for j, t in enumerate(col_titles):
+        axes[0, j].set_title(t, fontsize=10, fontweight="bold", pad=8)
+
+    for idx, (img_t, label, fname) in enumerate(collected):
+        gt_idx  = label.nonzero(as_tuple=True)[0].item()
+        gt_name = config.CLASSES[gt_idx]
+        pil_img = tensor_to_pil(img_t).convert("RGB")
+        img_dev = img_t.unsqueeze(0).to(device)
+
+        def get_heatmap(model):
+            with torch.no_grad():
+                out = model(img_dev)
+            y_cls    = out["y_cls"][0].detach().cpu().numpy()
+            att_maps = out["att_maps"][0].detach().cpu().numpy()
+            y_att    = out["y_att"][0].detach().cpu().numpy()
+            y_diag   = out["y_diag"][0].detach().cpu().numpy()
+            hm = att_maps[gt_idx]
+            hm = (hm - hm.min()) / (hm.max() - hm.min() + 1e-8)
+            return hm, float(y_cls[gt_idx]), float(y_att[gt_idx]), float(y_diag[gt_idx])
+
+        hm1, cls1, att1, diag1 = get_heatmap(model1)
+        hm2, cls2, att2, diag2 = get_heatmap(model2)
+
+        # original
+        axes[idx, 0].imshow(pil_img)
+        axes[idx, 0].set_ylabel(f"{fname}\nGT: {gt_name}", fontsize=6, rotation=0,
+                                 labelpad=60, va="center")
+        axes[idx, 0].axis("off")
+
+        # model 1 heatmap
+        axes[idx, 1].imshow(overlay_heatmap(pil_img, hm1))
+        axes[idx, 1].set_title(f"cls:{cls1:.3f} att:{att1:.3f} diag:{diag1:.3f}", fontsize=8)
+        axes[idx, 1].axis("off")
+
+        # model 2 heatmap
+        axes[idx, 2].imshow(overlay_heatmap(pil_img, hm2))
+        axes[idx, 2].set_title(f"cls:{cls2:.3f} att:{att2:.3f} diag:{diag2:.3f}", fontsize=8)
+        axes[idx, 2].axis("off")
+
+    plt.suptitle(f"Correctly predicted — {label1} vs {label2} attention heatmaps",
+                 fontsize=12, y=1.01)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved comparison → {save_path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--backbone",   default=config.BACKBONE)
-    parser.add_argument("--image_path", default=None,
-                        help="Path to a single image (single-image mode)")
-    parser.add_argument("--label",      default="",
-                        help="Ground-truth label string e.g. 'Atelectasis|Effusion'")
-    parser.add_argument("--batch",      type=int, default=0,
-                        help="Number of test images for grid visualisation")
-    parser.add_argument("--out",        default=".", help="Output directory")
+    parser.add_argument("--checkpoint",  required=True, help="Primary checkpoint")
+    parser.add_argument("--checkpoint2", default=None,  help="Second checkpoint for comparison mode")
+    parser.add_argument("--label1",      default="Stage1", help="Label for first checkpoint")
+    parser.add_argument("--label2",      default="Stage3", help="Label for second checkpoint")
+    parser.add_argument("--backbone",    default=config.BACKBONE)
+    parser.add_argument("--image_path",  default=None)
+    parser.add_argument("--label",       default="")
+    parser.add_argument("--batch",       type=int, default=0)
+    parser.add_argument("--out",         default=".", help="Output directory")
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -243,7 +334,7 @@ def main():
 
     model = ThoraxNet(backbone=args.backbone).to(device)
     ckpt  = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(ckpt["model"])
+    model.load_state_dict(ckpt["model"], strict=False)
 
     transform = build_test_transform()
 
@@ -258,14 +349,52 @@ def main():
         visualize_single(model, img_t, label_vec, device,
                           save_path=os.path.join(args.out, "heatmap_single.png"))
 
-    if args.batch > 0:
+    if args.checkpoint2:
+        # ── Comparison mode: two checkpoints side by side ─────────────────────
+        model2 = ThoraxNet(backbone=args.backbone).to(device)
+        ckpt2  = torch.load(args.checkpoint2, map_location=device)
+        model2.load_state_dict(ckpt2["model"], strict=False)
+        n = args.batch if args.batch > 0 else 9
+        _, val_loader, _, _ = get_loaders(batch_size=32)
+        visualize_comparison(model, model2, val_loader, device, n=n,
+                              label1=args.label1, label2=args.label2,
+                              save_path=os.path.join(args.out, "comparison.png"))
+
+    elif args.batch > 0:
         bbox_map = load_bbox_map(config.BBOX_FILE)
         if bbox_map:
             print(f"Loaded {len(bbox_map)} bbox entries from {config.BBOX_FILE}")
         else:
             print(f"No bbox file found at {config.BBOX_FILE} — drawing heatmaps only")
-        _, val_loader, _, _ = get_loaders(batch_size=32)
-        visualize_batch_grid(model, val_loader, device, n=args.batch,
+        # Build a small loader containing only bbox-annotated images
+        # (avoids iterating the full 20k dataset which causes OOM)
+        from torch.utils.data import DataLoader, Dataset
+        FOCUS = {"Atelectasis", "Effusion", "Infiltration", "Nodule"}
+        from data.dataset import load_label_map, labels_to_vec
+        label_map = load_label_map()
+        transform = build_test_transform()
+
+        class BboxSubset(Dataset):
+            def __init__(self):
+                self.items = []
+                for fname in bbox_map:
+                    img_path = os.path.join(config.IMAGE_DIR, fname)
+                    if not os.path.isfile(img_path):
+                        continue
+                    labels = label_map.get(fname, ["No Finding"])
+                    if len(labels) == 1 and labels[0] in FOCUS:
+                        self.items.append((fname, labels[0]))
+            def __len__(self): return len(self.items)
+            def __getitem__(self, idx):
+                fname, _ = self.items[idx]
+                img = Image.open(os.path.join(config.IMAGE_DIR, fname)).convert("RGB")
+                lbl = torch.from_numpy(labels_to_vec(label_map.get(fname, ["No Finding"])))
+                return transform(img), lbl, fname
+
+        bbox_ds = BboxSubset()
+        print(f"Focus-class single-label images with bbox: {len(bbox_ds)}")
+        bbox_loader = DataLoader(bbox_ds, batch_size=16, shuffle=False, num_workers=2)
+        visualize_batch_grid(model, bbox_loader, device, n=args.batch,
                               save_path=os.path.join(args.out, "heatmap_grid.png"),
                               bbox_map=bbox_map)
 

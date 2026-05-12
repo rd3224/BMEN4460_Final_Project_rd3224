@@ -65,7 +65,8 @@ def print_auc_table(auc_dict: dict):
 
 
 def plot_roc_curves(y_true: np.ndarray, y_score: np.ndarray,
-                    classes=None, save_path: str = "roc_curves.png"):
+                    classes=None, save_path: str = "roc_curves.png",
+                    title: str = "ROC Curves"):
     """
     Plot ROC curves for all 14 classes on a single figure.
     Mirrors Fig. 5 in the paper.
@@ -85,7 +86,7 @@ def plot_roc_curves(y_true: np.ndarray, y_score: np.ndarray,
     ax.plot([0, 1], [0, 1], "k--", lw=1)
     ax.set_xlabel("False Positive Rate", fontsize=12)
     ax.set_ylabel("True Positive Rate", fontsize=12)
-    ax.set_title("ROC Curves — Thorax-Net", fontsize=14)
+    ax.set_title(title, fontsize=14)
     ax.legend(fontsize=7, loc="lower right", ncol=2)
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1.01])
