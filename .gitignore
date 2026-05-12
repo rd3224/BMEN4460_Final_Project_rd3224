@@ -1,0 +1,35 @@
+# ── Data ──────────────────────────────────────────────────────────────────────
+data/chestxray14/images/
+data/chestxray14/*.csv
+data/chestxray14/*.zip
+data/chestxray14/*.log
+# Keep split txt files (needed to reproduce the exact train/val/test split)
+!data/chestxray14/train_val_list_subset.txt
+!data/chestxray14/train_val_list.txt
+!data/chestxray14/test_list.txt
+
+# ── Checkpoints ───────────────────────────────────────────────────────────────
+checkpoints/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+nohup.out
+
+# ── Outputs ───────────────────────────────────────────────────────────────────
+vis_*/
+roc_*.png
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+.DS_Store
+.env
+*.swp
